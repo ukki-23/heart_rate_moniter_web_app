@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>プール心拍モニター</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #1a1d24; --panel2: #222631; --text: #e8eaed; --muted: #8a919e;
+    --line: #2d3240; --accent: #4ea1ff; --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+    --z1: #9ca3af; --z2: #38bdf8; --z3: #4ade80; --z4: #fb923c; --z5: #f43f5e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px;
+           align-items: center; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0 8px 0 0; white-space: nowrap; }
+  .group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button, select { font: inherit; font-size: 14px; color: var(--text); background: var(--panel2);
+                   border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.rec { border-color: var(--bad); }
+  button.rec.on { background: var(--bad); color: #fff; }
+  #recTime { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 4.5em; }
+  #recTime.on { color: var(--bad); font-weight: 600; }
+  .banner { margin: 16px; padding: 12px 16px; border-radius: 8px; background: #3a1f1f; border: 1px solid var(--bad); }
+  .hint { margin: 16px; padding: 12px 16px; border-radius: 8px; background: var(--panel); color: var(--muted);
+          line-height: 1.7; font-size: 14px; }
+  #msg { margin: 0 16px; color: var(--warn); font-size: 14px; min-height: 1em; }
+  #grid { display: grid; gap: 16px; padding: 16px; }
+  .slot { min-height: 120px; border-radius: 12px; border: 2px dashed transparent; }
+  body.arranging .slot { border-color: var(--line); }
+  .slot.over, .card.over { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .show label { display: flex; align-items: center; gap: 4px; font-size: 14px; cursor: pointer; }
+  body.hide-graph canvas, body.hide-stats .stats, body.hide-zbar .zbar { display: none; }
+
+  .card { --zc: var(--line);
+          background: color-mix(in srgb, var(--zc) 18%, var(--panel));
+          border: 2px solid color-mix(in srgb, var(--zc) 70%, transparent); border-left: 12px solid var(--zc);
+          border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+          transition: background-color .4s, border-color .4s; container-type: inline-size; min-width: 0; }
+  .card.dragging { opacity: .4; outline: 2px dashed var(--accent); }
+  .handle { cursor: grab; color: var(--muted); font-size: 20px; padding: 0 2px; user-select: none; }
+  .handle:active { cursor: grabbing; }
+  .zbar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; align-items: end; }
+  .zbar span { height: 18px; border-radius: 4px; font-size: 12px; font-weight: 800; color: #0f1115;
+               display: flex; align-items: center; justify-content: center; opacity: .22;
+               transition: opacity .3s, height .3s; }
+  .zbar span:nth-child(1) { background: var(--z1); }
+  .zbar span:nth-child(2) { background: var(--z2); }
+  .zbar span:nth-child(3) { background: var(--z3); }
+  .zbar span:nth-child(4) { background: var(--z4); }
+  .zbar span:nth-child(5) { background: var(--z5); }
+  .zbar span.on { opacity: 1; height: 30px; font-size: 16px; }
+  .card .top { display: flex; gap: 8px; align-items: center; }
+  .card .name { flex: 1; min-width: 0; font: inherit; font-size: 20px; font-weight: 700; color: var(--text);
+                background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 6px; }
+  .card .name:hover, .card .name:focus { border-color: var(--line); outline: none; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+          background: var(--panel2); color: var(--muted); border: 1px solid var(--line); }
+  .pill.live { color: var(--ok); border-color: var(--ok); }
+  .pill.stale { color: var(--warn); border-color: var(--warn); }
+  .pill.off { color: var(--bad); border-color: var(--bad); }
+  .close { padding: 2px 9px; font-size: 16px; line-height: 1.2; }
+  .mid { display: flex; align-items: flex-end; gap: 14px; }
+  .bpm { font-size: clamp(48px, 28cqw, 140px); font-weight: 800; line-height: 0.9; font-variant-numeric: tabular-nums; transition: opacity .3s; }
+  .bpm.stale { opacity: 0.4; }
+  .unit { color: var(--muted); font-size: 16px; margin-bottom: 6px; }
+  .zone { margin-left: auto; text-align: right; }
+  .zone .z { font-size: clamp(20px, 9cqw, 40px); font-weight: 800; color: #0f1115; background: var(--zc);
+             border-radius: 8px; padding: 2px 14px; display: inline-block; }
+  .zone .pct { color: var(--muted); font-size: 14px; }
+  .ago { color: var(--warn); font-size: 14px; min-height: 1.2em; }
+  .stats { display: flex; gap: 16px; font-size: 13px; color: var(--muted); flex-wrap: wrap; align-items: center; }
+  .stats .reset { padding: 0 6px; font-size: 14px; line-height: 1.5; color: var(--muted);
+                  background: transparent; border-color: transparent; margin-right: -10px; }
+  .stats .reset:hover { color: var(--text); border-color: var(--line); }
+  .stats b { color: var(--text); font-size: 16px; font-variant-numeric: tabular-nums; }
+  .stats label { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .stats input { width: 64px; font: inherit; color: var(--text); background: var(--panel2);
+                 border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  canvas { width: 100%; height: 75px; display: block; background: var(--bg); border-radius: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>プール心拍モニター</h1>
+  <div class="group">
+    <button class="primary" id="addBtn">＋ ウォッチを接続</button>
+    <button id="restoreBtn" hidden>前回のウォッチに再接続</button>
+    <button id="demoBtn" title="ウォッチなしで画面を試すための模擬データ">デモ選手を追加</button>
+  </div>
+  <div class="group">
+    <button class="rec" id="recBtn">● 記録開始</button>
+    <span id="recTime">--:--</span>
+    <button id="csvBtn" disabled>CSV保存</button>  </div>
+  <div class="group">
+    <label for="range" style="color:var(--muted);font-size:14px">グラフ表示</label>
+    <select id="range">
+      <option value="2">2分</option>
+      <option value="5" selected>5分</option>
+      <option value="6">6分</option>
+      <option value="7">7分</option>
+      <option value="10">10分</option>
+      <option value="30">30分</option>
+    </select>
+    <label for="cols" style="color:var(--muted);font-size:14px;margin-left:8px">列数</label>
+    <select id="cols">
+      <option value="1">1列</option>
+      <option value="2">2列</option>
+      <option value="3">3列</option>
+      <option value="4" selected>4列</option>
+      <option value="5">5列</option>
+      <option value="6">6列</option>
+      <option value="7">7列</option>
+    </select>
+  </div>
+  <div class="group show">
+    <span style="color:var(--muted);font-size:14px">表示</span>
+    <label><input type="checkbox" id="show-zbar" checked>ゾーンバー</label>
+    <label><input type="checkbox" id="show-stats" checked>統計</label>
+    <label><input type="checkbox" id="show-graph" checked>グラフ</label>
+  </div>
+</header>
+
+<div class="banner" id="unsupported" hidden>
+  このブラウザは Web Bluetooth に対応していません。Windows の <b>Google Chrome</b> または <b>Microsoft Edge</b> で開いてください。
+</div>
+<p id="msg"></p>
+<div class="hint" id="hint">
+  <b>使い方</b><br>
+  1. ウォッチで「心拍転送」（設定 → センサー → 心拍 → 心拍転送 / 機種により異なる）を開始します。<br>
+  2. 「＋ ウォッチを接続」を押し、一覧からウォッチを選びます。選手の人数分くり返します。<br>
+  3. 泳いでいる間（水中）は電波が届かないため「信号なし」になります。壁で休んで腕が水面に出ると自動で受信を再開します。<br>
+  4. 選手名と最大心拍数はカードの上で直接編集できます（ウォッチごとに保存されます）。<br>
+  5. カード左上の「⠿」をドラッグすると、好きなマスに置けます（空きマスに移動／カードの上に落とすと入れ替え）。配置は自動で保存されます。
+</div>
+<div id="grid"></div>
+
+<template id="cardTpl">
+  <div class="card">
+    <div class="top">
+      <span class="handle" title="ドラッグして並べ替え">⠿</span>
+      <input class="name" maxlength="20" aria-label="選手名">
+      <span class="pill">接続中…</span>
+      <button class="close" title="この選手を外す">×</button>
+    </div>
+    <div class="mid">
+      <div class="bpm">--</div>
+      <div class="unit">bpm</div>
+      <div class="zone"><div class="z">--</div><div class="pct"></div></div>
+    </div>
+    <div class="zbar"><span>Z1</span><span>Z2</span><span>Z3</span><span>Z4</span><span>Z5</span></div>
+    <div class="ago"></div>
+    <div class="stats">
+      <button class="reset" title="この選手の平均・最高・最低をリセット">↻</button>
+      <span>平均 <b class="avg">--</b></span>
+      <span>最高 <b class="max">--</b></span>
+      <span>最低 <b class="min">--</b></span>
+      <label>最大心拍 <input class="maxhr" type="number" min="100" max="240" step="1"></label>
+    </div>
+    <canvas></canvas>
+  </div>
+</template>
+
+<script>
+"use strict";
+
+// ---- 設定 ----
+const STALE_MS = 4000;          // これ以上受信がなければ「信号なし」
+const RECONNECT_MS = 2000;      // 再接続を試みる間隔
+const CONNECT_TIMEOUT_MS = 10000;
+const GAP_MS = 5000;            // グラフでこれ以上空いたら線を切る
+const KEEP_MS = 30 * 60 * 1000; // グラフ用に保持する時間
+const ZONES = [
+  { name: "Z1", from: 0,   color: "--z1" },
+  { name: "Z2", from: 0.6, color: "--z2" },
+  { name: "Z3", from: 0.7, color: "--z3" },
+  { name: "Z4", from: 0.8, color: "--z4" },
+  { name: "Z5", from: 0.9, color: "--z5" },
+];
+
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+const athletes = new Map();
+let recording = false, recStart = 0, records = [];
+let demoCount = 0;
+
+// ---- 保存設定（選手名・最大心拍） ----
+function loadSettings(id) {
+  try { return JSON.parse(localStorage.getItem("hrmon:" + id)) || {}; } catch { return {}; }
+}
+function saveSettings(a) {
+  try { localStorage.setItem("hrmon:" + a.id, JSON.stringify({ name: a.name, maxHr: a.maxHr })); } catch {}
+}
+
+function showMsg(text) {
+  $("msg").textContent = text;
+  clearTimeout(showMsg.t);
+  if (text) showMsg.t = setTimeout(() => ($("msg").textContent = ""), 8000);
+}
+
+function zoneOf(bpm, maxHr) {
+  const pct = bpm / maxHr;
+  let z = ZONES[0];
+  for (const zone of ZONES) if (pct >= zone.from) z = zone;
+  return { zone: z, pct };
+}
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
+
+// ---- Bluetooth 接続 ----
+async function addWatch() {
+  try {
+    const device = await navigator.bluetooth.requestDevice({ filters: [{ services: ["heart_rate"] }] });
+    setupAthlete(device);
+  } catch (e) {
+    if (e.name !== "NotFoundError") showMsg("接続できませんでした: " + e.message);
+  }
+}
+
+async function restoreWatches() {
+  try {
+    const devices = await navigator.bluetooth.getDevices();
+    if (!devices.length) { showMsg("前回接続したウォッチが見つかりません。「＋ ウォッチを接続」から選んでください。"); return; }
+    devices.forEach(setupAthlete);
+  } catch (e) {
+    showMsg("再接続できませんでした: " + e.message);
+  }
+}
+
+function setupAthlete(device) {
+  if (athletes.has(device.id)) {
+    const a = athletes.get(device.id);
+    a.manual = false;
+    connect(a);
+    return;
+  }
+  const s = loadSettings(device.id);
+  const a = {
+    id: device.id, device, isDemo: false,
+    name: s.name || device.name || "ウォッチ", maxHr: s.maxHr || 190,
+    samples: [], last: null, lastTime: 0,
+    state: "connecting", connecting: false, manual: false, removed: false,
+    retryTimer: null, char: null,
+    sess: { sum: 0, n: 0, max: null, min: null },
+  };
+  a.onValue = (e) => onHeartRate(a, e.target.value);
+  device.addEventListener("gattserverdisconnected", () => onDisconnected(a));
+  athletes.set(a.id, a);
+  createCard(a);
+  connect(a);
+}
+
+async function connect(a) {
+  clearTimeout(a.retryTimer);
+  if (a.removed || a.manual || a.connecting) return;
+  a.connecting = true;
+  if (a.state !== "live") a.state = a.everConnected ? "reconnecting" : "connecting";
+  try {
+    const server = await withTimeout(a.device.gatt.connect(), CONNECT_TIMEOUT_MS);
+    const service = await server.getPrimaryService("heart_rate");
+    const ch = await service.getCharacteristic("heart_rate_measurement");
+    if (a.char) a.char.removeEventListener("characteristicvaluechanged", a.onValue);
+    ch.addEventListener("characteristicvaluechanged", a.onValue);
+    await ch.startNotifications();
+    a.char = ch;
+    a.state = "live";
+    a.everConnected = true;
+  } catch (e) {
+    console.warn(a.name, "connect failed:", e.message);
+    a.connecting = false;
+    try { a.device.gatt.disconnect(); } catch {}
+    scheduleReconnect(a);
+    return;
+  }
+  a.connecting = false;
+}
+
+function onDisconnected(a) {
+  if (a.removed) return;
+  if (a.manual) { a.state = "disconnected"; return; }
+  scheduleReconnect(a);
+}
+
+function scheduleReconnect(a) {
+  if (a.removed || a.manual) return;
+  a.state = "reconnecting";
+  clearTimeout(a.retryTimer);
+  a.retryTimer = setTimeout(() => connect(a), RECONNECT_MS);
+}
+
+// Heart Rate Measurement (0x2A37) の解析
+function onHeartRate(a, dv) {
+  const flags = dv.getUint8(0);
+  const bpm = flags & 0x01 ? dv.getUint16(1, true) : dv.getUint8(1);
+  if (!bpm) return; // 未装着などで 0 が来ることがある
+  pushSample(a, bpm);
+}
+
+function pushSample(a, bpm) {
+  const t = Date.now();
+  a.last = bpm;
+  a.lastTime = t;
+  a.state = "live";
+  a.samples.push({ t, bpm });
+  while (a.samples.length && t - a.samples[0].t > KEEP_MS) a.samples.shift();
+  if (recording) records.push({ t, name: a.name, bpm, maxHr: a.maxHr });
+  // 平均・最高・最低は記録の有無にかかわらず常に集計
+  const s = a.sess;
+  s.sum += bpm; s.n++;
+  s.max = s.max === null ? bpm : Math.max(s.max, bpm);
+  s.min = s.min === null ? bpm : Math.min(s.min, bpm);
+}
+
+function resetStats() {
+  athletes.forEach((a) => (a.sess = { sum: 0, n: 0, max: null, min: null }));
+}
+
+function removeAthlete(a) {
+  a.removed = true;
+  a.manual = true;
+  clearTimeout(a.retryTimer);
+  clearInterval(a.demoTimer);
+  if (!a.isDemo) {
+    if (a.char) a.char.removeEventListener("characteristicvaluechanged", a.onValue);
+    try { if (a.device.gatt.connected) a.device.gatt.disconnect(); } catch {}
+  }
+  a.el.remove();
+  athletes.delete(a.id);
+  layoutGrid();
+  updateHint();
+}
+
+// ---- デモ（ウォッチなしで試す用：泳ぐ40秒は信号なし → 休憩20秒は受信） ----
+function addDemo() {
+  demoCount++;
+  const a = {
+    id: "demo-" + demoCount, isDemo: true,
+    name: "デモ選手" + demoCount, maxHr: 190 + demoCount * 2,
+    samples: [], last: null, lastTime: 0, state: "live", sess: { sum: 0, n: 0, max: null, min: null },
+  };
+  const start = Date.now() - demoCount * 13000;
+  a.demoTimer = setInterval(() => {
+    const cycle = ((Date.now() - start) / 1000) % 60;
+    if (cycle < 40) return; // 水中：受信なし
+    const rest = cycle - 40;
+    const peak = 165 + demoCount * 4;
+    pushSample(a, Math.round(peak - rest * 2.2 + (Math.random() - 0.5) * 3));
+  }, 1000);
+  athletes.set(a.id, a);
+  createCard(a);
+}
+
+// ---- 画面 ----
+function createCard(a) {
+  const el = $("cardTpl").content.firstElementChild.cloneNode(true);
+  a.el = el;
+  a.ui = {
+    name: el.querySelector(".name"), pill: el.querySelector(".pill"), bpm: el.querySelector(".bpm"),
+    z: el.querySelector(".z"), pct: el.querySelector(".pct"), ago: el.querySelector(".ago"),
+    avg: el.querySelector(".avg"), max: el.querySelector(".max"), min: el.querySelector(".min"),
+    maxhr: el.querySelector(".maxhr"), canvas: el.querySelector("canvas"),
+    zbar: [...el.querySelectorAll(".zbar span")],
+  };
+  a.ui.name.value = a.name;
+  a.ui.maxhr.value = a.maxHr;
+  a.ui.name.addEventListener("change", () => {
+    a.name = a.ui.name.value.trim() || a.device?.name || "ウォッチ";
+    a.ui.name.value = a.name;
+    saveSettings(a);
+  });
+  a.ui.maxhr.addEventListener("change", () => {
+    const v = parseInt(a.ui.maxhr.value, 10);
+    if (v >= 100 && v <= 240) { a.maxHr = v; saveSettings(a); } else a.ui.maxhr.value = a.maxHr;
+  });
+  el.querySelector(".reset").addEventListener("click", () => {
+    a.sess = { sum: 0, n: 0, max: null, min: null };
+  });
+  el.querySelector(".close").addEventListener("click", () => {
+    if (confirm(`「${a.name}」を外しますか？`)) removeAthlete(a);
+  });
+  // つまみを押したときだけドラッグ可能にする（名前入力の文字選択を邪魔しないため）
+  const handle = el.querySelector(".handle");
+  handle.addEventListener("pointerdown", () => (el.draggable = true));
+  handle.addEventListener("pointerup", () => (el.draggable = false));
+  el.addEventListener("dragstart", (e) => {
+    dragging = a;
+    el.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", a.id);
+    document.body.classList.add("arranging");
+    setTimeout(layoutGrid, 0); // 空きマスと予備の1行を表示
+  });
+  el.addEventListener("dragend", () => {
+    el.classList.remove("dragging");
+    el.draggable = false;
+    dragging = null;
+    document.body.classList.remove("arranging");
+    layoutGrid();
+  });
+  // 他のカードの上に落とすと位置を入れ替え
+  makeDropTarget(el, () => a.pos);
+  placeCard(a);
+  layoutGrid();
+  updateHint();
+}
+
+// ---- 配置（マス目に自由配置。位置は自動保存） ----
+let dragging = null;
+const cols = () => parseInt($("cols").value, 10);
+const cellKey = (p) => p.c + "," + p.r;
+
+function loadPositions() {
+  try { return JSON.parse(localStorage.getItem("hrmon:pos")) || {}; } catch { return {}; }
+}
+function savePositions() {
+  const all = loadPositions();
+  athletes.forEach((a) => { if (a.pos) all[a.id] = a.pos; });
+  try { localStorage.setItem("hrmon:pos", JSON.stringify(all)); } catch {}
+}
+
+function occupiedCells(except) {
+  const s = new Set();
+  athletes.forEach((a) => { if (a !== except && a.pos) s.add(cellKey(a.pos)); });
+  return s;
+}
+function firstFreeCell(except) {
+  const occ = occupiedCells(except), n = cols();
+  for (let i = 0; ; i++) {
+    const p = { c: i % n, r: Math.floor(i / n) };
+    if (!occ.has(cellKey(p))) return p;
+  }
+}
+
+// 前回の位置が空いていればそこへ、なければ最初の空きマスへ
+function placeCard(a) {
+  const saved = loadPositions()[a.id];
+  const ok = saved && saved.c < cols() && !occupiedCells(a).has(cellKey(saved));
+  a.pos = ok ? saved : firstFreeCell(a);
+  savePositions();
+}
+
+function moveTo(a, p) {
+  if (!a || cellKey(a.pos) === cellKey(p)) return;
+  const other = [...athletes.values()].find((b) => b !== a && b.pos && cellKey(b.pos) === cellKey(p));
+  if (other) other.pos = a.pos;
+  a.pos = { c: p.c, r: p.r };
+  savePositions();
+  layoutGrid();
+}
+
+function makeDropTarget(el, getPos) {
+  el.addEventListener("dragover", (e) => {
+    if (!dragging || dragging.el === el) return;
+    e.preventDefault();
+    el.classList.add("over");
+  });
+  el.addEventListener("dragleave", (e) => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove("over");
+  });
+  el.addEventListener("drop", (e) => {
+    e.preventDefault();
+    el.classList.remove("over");
+    moveTo(dragging, getPos());
+  });
+}
+
+function layoutGrid() {
+  const grid = $("grid"), n = cols();
+  grid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+  grid.querySelectorAll(".slot").forEach((s) => s.remove());
+  grid.querySelectorAll(".over").forEach((s) => s.classList.remove("over"));
+
+  let rows = 0;
+  athletes.forEach((a) => {
+    a.el.style.gridColumn = a.pos.c + 1;
+    a.el.style.gridRow = a.pos.r + 1;
+    if (a.el.parentNode !== grid) grid.appendChild(a.el);
+    rows = Math.max(rows, a.pos.r + 1);
+  });
+  if (dragging) rows++; // ドラッグ中は下に1行増やして新しい行にも置けるようにする
+
+  const occ = occupiedCells();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < n; c++) {
+      if (occ.has(cellKey({ c, r }))) continue;
+      const slot = document.createElement("div");
+      slot.className = "slot";
+      slot.style.gridColumn = c + 1;
+      slot.style.gridRow = r + 1;
+      makeDropTarget(slot, () => ({ c, r }));
+      grid.appendChild(slot);
+    }
+  }
+}
+
+// 列数を減らしてはみ出したカードは空きマスへ移す
+function applyCols() {
+  const n = cols();
+  try { localStorage.setItem("hrmon:cols", n); } catch {}
+  const out = [...athletes.values()].filter((a) => a.pos.c >= n);
+  out.forEach((a) => (a.pos = null));
+  out.forEach((a) => (a.pos = firstFreeCell(a)));
+  if (out.length) savePositions();
+  layoutGrid();
+}
+$("cols").addEventListener("change", applyCols);
+try { const v = localStorage.getItem("hrmon:cols"); if (v) $("cols").value = v; } catch {}
+if (!$("cols").value) $("cols").value = "4";
+applyCols();
+
+// ---- 表示項目の切り替え ----
+const SHOW_ITEMS = ["graph", "stats", "zbar"];
+function applyShow() {
+  const show = {};
+  SHOW_ITEMS.forEach((k) => {
+    show[k] = $("show-" + k).checked;
+    document.body.classList.toggle("hide-" + k, !show[k]);
+  });
+  try { localStorage.setItem("hrmon:show", JSON.stringify(show)); } catch {}
+}
+try {
+  const saved = JSON.parse(localStorage.getItem("hrmon:show")) || {};
+  SHOW_ITEMS.forEach((k) => { if (k in saved) $("show-" + k).checked = saved[k]; });
+} catch {}
+SHOW_ITEMS.forEach((k) => $("show-" + k).addEventListener("change", applyShow));
+applyShow();
+
+function fmtAgo(ms) {
+  const s = Math.floor(ms / 1000);
+  return s < 60 ? `${s}秒前` : `${Math.floor(s / 60)}分${s % 60}秒前`;
+}
+
+function renderCard(a, now) {
+  const u = a.ui;
+  const stale = a.lastTime && now - a.lastTime > STALE_MS;
+
+  let pillText, pillClass;
+  if (a.state === "disconnected") { pillText = "切断"; pillClass = "off"; }
+  else if (a.lastTime && !stale) { pillText = "受信中"; pillClass = "live"; }
+  else if (a.state === "connecting") { pillText = "接続中…"; pillClass = ""; }
+  else { pillText = "信号なし"; pillClass = "stale"; }
+  u.pill.textContent = pillText;
+  u.pill.className = "pill " + pillClass;
+
+  if (a.last !== null) {
+    const { zone, pct } = zoneOf(a.last, a.maxHr);
+    u.bpm.textContent = a.last;
+    u.z.textContent = zone.name;
+    u.pct.textContent = Math.round(pct * 100) + "%";
+    // 受信中はカード全体をゾーン色に。信号なしのときは色を落とす
+    a.el.style.setProperty("--zc", stale ? css("--line") : css(zone.color));
+    u.bpm.style.color = stale ? "" : css(zone.color);
+    u.zbar.forEach((s, i) => s.classList.toggle("on", ZONES[i] === zone));
+  }
+  u.bpm.classList.toggle("stale", !!stale);
+  u.ago.textContent = stale ? `最終受信 ${fmtAgo(now - a.lastTime)}` : "";
+
+  const s = a.sess;
+  u.avg.textContent = s.n ? Math.round(s.sum / s.n) : "--";
+  u.max.textContent = s.max ?? "--";
+  u.min.textContent = s.min ?? "--";
+
+  drawGraph(a, now);
+}
+
+function drawGraph(a, now) {
+  const cv = a.ui.canvas;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return; // グラフ非表示中は描かない
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const span = parseInt($("range").value, 10) * 60000;
+  const t0 = now - span;
+  const yMin = Math.round(a.maxHr * 0.4), yMax = a.maxHr + 5;
+  const padR = 34;
+  const X = (t) => ((t - t0) / span) * (w - padR);
+  const Y = (b) => h - ((b - yMin) / (yMax - yMin)) * h;
+
+  // ゾーンの帯
+  ZONES.forEach((z, i) => {
+    const lo = Math.max(yMin, z.from * a.maxHr);
+    const hi = i < ZONES.length - 1 ? ZONES[i + 1].from * a.maxHr : yMax;
+    ctx.fillStyle = css(z.color);
+    ctx.globalAlpha = 0.2;
+    ctx.fillRect(0, Y(hi), w - padR, Y(lo) - Y(hi));
+    ctx.globalAlpha = 1;
+    if (z.from > 0) {
+      ctx.fillStyle = css("--muted");
+      ctx.font = "11px sans-serif";
+      ctx.fillText(Math.round(z.from * a.maxHr), w - padR + 4, Y(z.from * a.maxHr) + 4);
+    }
+  });
+
+  // 心拍の線（ゾーン色で描画。受信が途切れた区間は線を切る）
+  const pts = a.samples.filter((p) => p.t >= t0);
+  const zoneColors = new Map(ZONES.map((z) => [z, css(z.color)]));
+  const colorOf = (bpm) => zoneColors.get(zoneOf(bpm, a.maxHr).zone);
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  let seg = [];
+  const flush = () => {
+    if (seg.length === 1) {
+      ctx.fillStyle = colorOf(seg[0].bpm);
+      ctx.beginPath(); ctx.arc(X(seg[0].t), Y(seg[0].bpm), 3, 0, Math.PI * 2); ctx.fill();
+    }
+    for (let i = 1; i < seg.length; i++) {
+      ctx.strokeStyle = colorOf(seg[i].bpm);
+      ctx.beginPath();
+      ctx.moveTo(X(seg[i - 1].t), Y(seg[i - 1].bpm));
+      ctx.lineTo(X(seg[i].t), Y(seg[i].bpm));
+      ctx.stroke();
+    }
+    seg = [];
+  };
+  pts.forEach((p, i) => {
+    if (i && p.t - pts[i - 1].t > GAP_MS) flush();
+    seg.push(p);
+  });
+  flush();
+
+  ctx.fillStyle = css("--muted");
+  ctx.font = "11px sans-serif";
+  ctx.fillText(`-${$("range").value}分`, 4, h - 4);
+}
+
+function updateHint() {
+  $("hint").hidden = athletes.size > 0;
+}
+
+// ---- 記録・CSV ----
+function toggleRecording() {
+  recording = !recording;
+  if (recording) {
+    if (records.length && !confirm("前回の記録を消して新しく記録を始めますか？（必要なら先にCSV保存してください）")) {
+      recording = false;
+      return;
+    }
+    records = [];
+    recStart = Date.now();
+    resetStats();
+  }
+  $("recBtn").textContent = recording ? "■ 記録停止" : "● 記録開始";
+  $("recBtn").classList.toggle("on", recording);
+  $("recTime").classList.toggle("on", recording);
+  $("csvBtn").disabled = recording || !records.length;
+}
+
+function pad(n) { return String(n).padStart(2, "0"); }
+function csvCell(v) {
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function exportCsv() {
+  const rows = [["経過秒", "選手", "心拍(bpm)", "ゾーン"]];
+  for (const r of records) {
+    rows.push([
+      ((r.t - recStart) / 1000).toFixed(1), r.name, r.bpm,
+      zoneOf(r.bpm, r.maxHr).zone.name,
+    ]);
+  }
+  const text = "﻿" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+  const d = new Date(recStart);
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+  link.download = `心拍_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+// ---- 画面をスリープさせない ----
+let wakeLock = null;
+async function keepAwake() {
+  try { if ("wakeLock" in navigator && document.visibilityState === "visible") wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+}
+document.addEventListener("visibilitychange", keepAwake);
+
+// ---- 初期化 ----
+if (!navigator.bluetooth) {
+  $("unsupported").hidden = false;
+  $("addBtn").disabled = true;
+} else if (navigator.bluetooth.getDevices) {
+  $("restoreBtn").hidden = false;
+}
+$("addBtn").addEventListener("click", addWatch);
+$("restoreBtn").addEventListener("click", restoreWatches);
+$("demoBtn").addEventListener("click", addDemo);
+$("recBtn").addEventListener("click", toggleRecording);
+$("csvBtn").addEventListener("click", exportCsv);window.addEventListener("beforeunload", (e) => {
+  if (recording || records.length) { e.preventDefault(); e.returnValue = ""; }
+});
+keepAwake();
+
+setInterval(() => {
+  const now = Date.now();
+  athletes.forEach((a) => renderCard(a, now));
+  if (recording) {
+    const s = Math.floor((now - recStart) / 1000);
+    $("recTime").textContent = `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
+  }
+}, 500);
+</script>
+</body>
+</html>
