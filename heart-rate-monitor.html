@@ -25,6 +25,16 @@
   button.rec.on { background: var(--bad); color: #fff; }
   #recTime { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 4.5em; }
   #recTime.on { color: var(--bad); font-weight: 600; }
+  .circle label { font-size: 14px; color: var(--muted); }
+  .circle select { padding: 8px 6px; font-variant-numeric: tabular-nums; }
+  .circle select:disabled { opacity: .5; cursor: default; }
+  .circle .sep { font-weight: 700; margin: 0 -4px; }
+  #circleTime { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right;
+                color: var(--muted); transition: color .3s; }
+  #circleTime.on { color: var(--ok); }
+  #circleTime.flash { color: var(--warn); transition: none; }
+  #circleRep { font-size: 13px; color: var(--muted); min-width: 3em; }
+  button.circle-btn.on { background: var(--bad); border-color: var(--bad); color: #fff; }
   .banner { margin: 16px; padding: 12px 16px; border-radius: 8px; background: #3a1f1f; border: 1px solid var(--bad); }
   .hint { margin: 16px; color: var(--muted); line-height: 1.7; font-size: 14px; }
   .hint p { margin: 0; color: var(--text); }
@@ -47,7 +57,8 @@
   .settings-panel .checks { display: flex; gap: 12px; flex-wrap: wrap; }
   .settings-panel .checks label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .settings-panel #demoBtn { grid-column: 1 / -1; justify-self: start; }
-  body.hide-graph canvas, body.hide-stats .stats, body.hide-zbar .zbar { display: none; }
+  body.hide-graph canvas, body.hide-stats .stats, body.hide-zbar .zbar,
+  body.hide-rec .rec-group { display: none; }
 
   .card { --zc: var(--line);
           background: color-mix(in srgb, var(--zc) 18%, var(--panel));
@@ -98,10 +109,17 @@
     <button class="primary" id="addBtn">＋ ウォッチを接続</button>
     <button id="restoreBtn" hidden>前回のウォッチに再接続</button>
   </div>
-  <div class="group">
+  <div class="group rec-group">
     <button class="rec" id="recBtn">● 記録開始</button>
     <span id="recTime">--:--</span>
     <button id="csvBtn" disabled>CSV保存</button>
+  </div>
+  <div class="group circle">
+    <label for="circleMin">サークル</label>
+    <select id="circleMin" aria-label="分"></select><span class="sep">:</span><select id="circleSecSel" aria-label="秒"></select>
+    <button class="circle-btn" id="circleBtn">▶ スタート</button>
+    <span id="circleTime">--:--</span>
+    <span id="circleRep"></span>
   </div>
   <details class="settings" id="settings">
     <summary>⚙️ 設定</summary>
@@ -133,6 +151,11 @@
       <label><input type="checkbox" id="show-zbar" checked>ゾーンバー</label>
       <label><input type="checkbox" id="show-stats" checked>統計</label>
       <label><input type="checkbox" id="show-graph" checked>グラフ</label>
+      <label><input type="checkbox" id="show-rec">記録ボタン</label>
+    </div>
+    <label for="circleSound">サークル音</label>
+    <div class="checks">
+      <label><input type="checkbox" id="circleSound" checked>切り替わりで鳴らす</label>
     </div>
     <button id="demoBtn" title="ウォッチなしで画面を試すための模擬データ">デモ選手を追加</button>
     </div>
@@ -531,7 +554,7 @@ if (!$("cols").value) $("cols").value = "4";
 applyCols();
 
 // ---- 表示項目の切り替え ----
-const SHOW_ITEMS = ["graph", "stats", "zbar"];
+const SHOW_ITEMS = ["graph", "stats", "zbar", "rec"];
 function applyShow() {
   const show = {};
   SHOW_ITEMS.forEach((k) => {
@@ -692,6 +715,90 @@ function exportCsv() {
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
+
+// ---- サークルタイマー ----
+// 0:00 になったら同じ秒数で自動的に次の本へ。経過時間から毎回計算するのでずれない。
+let circleSec = 0, circleStart = 0, circleRepShown = 0;
+// 分は 0〜20、秒は 5 秒刻みで選ぶ
+for (let m = 0; m <= 20; m++) $("circleMin").add(new Option(m, m));
+for (let sec = 0; sec < 60; sec += 5) $("circleSecSel").add(new Option(pad(sec), sec));
+const circlePickers = () => [$("circleMin"), $("circleSecSel")];
+function setCirclePicker(total) {
+  $("circleMin").value = Math.min(20, Math.floor(total / 60));
+  $("circleSecSel").value = Math.round((total % 60) / 5) * 5 % 60;
+}
+const fmtCircle = (s) => `${Math.floor(s / 60)}:${pad(s % 60)}`;
+// 切り替わりの合図音。AudioContext はクリック時にしか作れないのでスタート時に用意する
+let audioCtx = null;
+function beep() {
+  if (!audioCtx || !$("circleSound").checked) return;
+  const t = audioCtx.currentTime;
+  [0, 0.18].forEach((d) => {
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.type = "square";
+    osc.frequency.value = 1320;
+    gain.gain.setValueAtTime(0.25, t + d);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + d + 0.15);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t + d);
+    osc.stop(t + d + 0.15);
+  });
+}
+function toggleCircle() {
+  if (circleStart) {
+    circleStart = 0;
+    $("circleBtn").textContent = "▶ スタート";
+    $("circleBtn").classList.remove("on");
+    circlePickers().forEach((el) => (el.disabled = false));
+    $("circleTime").className = "";
+    previewCircle();
+    $("circleRep").textContent = "";
+    return;
+  }
+  const sec = Number($("circleMin").value) * 60 + Number($("circleSecSel").value);
+  if (!sec) { showMsg("サークルは 0:05 以上にしてください。"); return; }
+  showMsg("");
+  try { audioCtx ||= new AudioContext(); audioCtx.resume(); } catch {}
+  circleSec = sec;
+  try { localStorage.setItem("hrmon:circle", sec); } catch {}
+  circleStart = Date.now();
+  circleRepShown = 1;
+  $("circleBtn").textContent = "■ ストップ";
+  $("circleBtn").classList.add("on");
+  circlePickers().forEach((el) => (el.disabled = true));
+  $("circleTime").className = "on";
+  renderCircle(circleStart);
+}
+function renderCircle(now) {
+  if (!circleStart) return;
+  const elapsed = Math.floor((now - circleStart) / 1000);
+  const rep = Math.floor(elapsed / circleSec) + 1;
+  $("circleTime").textContent = fmtCircle(circleSec - (elapsed % circleSec));
+  $("circleRep").textContent = `${rep}本目`;
+  if (rep !== circleRepShown) {   // 次の本に切り替わった瞬間だけ色を変えて知らせる
+    circleRepShown = rep;
+    beep();
+    $("circleTime").classList.add("flash");
+    setTimeout(() => $("circleTime").classList.remove("flash"), 1500);
+  }
+}
+let savedCircle = 390;   // 6:30
+try { const v = Number(localStorage.getItem("hrmon:circle")); if (v > 0) savedCircle = v; } catch {}
+setCirclePicker(savedCircle);
+// 止まっている間は選んだ時間をそのまま表示しておく
+function previewCircle() {
+  if (circleStart) return;
+  const sec = Number($("circleMin").value) * 60 + Number($("circleSecSel").value);
+  $("circleTime").textContent = sec ? fmtCircle(sec) : "--:--";
+}
+circlePickers().forEach((el) => el.addEventListener("change", previewCircle));
+previewCircle();
+try { if (localStorage.getItem("hrmon:circleSound") === "0") $("circleSound").checked = false; } catch {}
+$("circleSound").addEventListener("change", () => {
+  try { localStorage.setItem("hrmon:circleSound", $("circleSound").checked ? "1" : "0"); } catch {}
+});
+$("circleBtn").addEventListener("click", toggleCircle);
+setInterval(() => renderCircle(Date.now()), 100);
 
 // ---- 画面をスリープさせない ----
 let wakeLock = null;
