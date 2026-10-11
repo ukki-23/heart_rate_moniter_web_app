@@ -666,6 +666,24 @@ function drawGraph(a, now) {
   });
   flush();
 
+  // サークルのスタート（青の実線）・切り替わり（点線）・ストップ（赤の実線）。上端に印を出す
+  ctx.font = "bold 11px sans-serif";
+  ctx.lineWidth = 1.5;
+  circleMarks.forEach((m) => {
+    if (m.t < t0) return;
+    const x = Math.round(X(m.t)) + 0.5;
+    const stop = m.rep === "stop", start = m.rep === 1;
+    ctx.strokeStyle = ctx.fillStyle = stop ? css("--bad") : start ? css("--accent") : css("--text");
+    ctx.globalAlpha = stop || start ? 0.9 : 0.55;
+    ctx.setLineDash(stop || start ? [] : [4, 3]);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    ctx.globalAlpha = 1;
+    const label = stop ? "E" : start ? "S" : String(m.rep);
+    // ストップの印は線の左側に置き、直前の切り替わりの数字と重なりにくくする
+    ctx.fillText(label, stop ? x - 3 - ctx.measureText(label).width : x + 3, 11);
+  });
+  ctx.setLineDash([]);
+
   ctx.fillStyle = css("--muted");
   ctx.font = "11px sans-serif";
   ctx.fillText(`-${$("range").value}分`, 4, h - 4);
@@ -719,6 +737,11 @@ function exportCsv() {
 // ---- サークルタイマー ----
 // 0:00 になったら同じ秒数で自動的に次の本へ。経過時間から毎回計算するのでずれない。
 let circleSec = 0, circleStart = 0, circleRepShown = 0;
+const circleMarks = [];   // グラフに縦線を引く時刻 { t, rep }（rep は本数、ストップは "stop"）
+function addCircleMark(t, rep) {
+  circleMarks.push({ t, rep });
+  while (circleMarks.length && circleMarks[0].t < Date.now() - KEEP_MS) circleMarks.shift();
+}
 // 分は 0〜20、秒は 5 秒刻みで選ぶ
 for (let m = 0; m <= 20; m++) $("circleMin").add(new Option(m, m));
 for (let sec = 0; sec < 60; sec += 5) $("circleSecSel").add(new Option(pad(sec), sec));
@@ -746,6 +769,7 @@ function beep() {
 }
 function toggleCircle() {
   if (circleStart) {
+    addCircleMark(Date.now(), "stop");
     circleStart = 0;
     $("circleBtn").textContent = "▶ スタート";
     $("circleBtn").classList.remove("on");
@@ -763,6 +787,7 @@ function toggleCircle() {
   try { localStorage.setItem("hrmon:circle", sec); } catch {}
   circleStart = Date.now();
   circleRepShown = 1;
+  addCircleMark(circleStart, 1);
   $("circleBtn").textContent = "■ ストップ";
   $("circleBtn").classList.add("on");
   circlePickers().forEach((el) => (el.disabled = true));
@@ -778,6 +803,7 @@ function renderCircle(now) {
   if (rep !== circleRepShown) {   // 次の本に切り替わった瞬間だけ色を変えて知らせる
     circleRepShown = rep;
     beep();
+    addCircleMark(circleStart + (rep - 1) * circleSec * 1000, rep);   // 検出時刻ではなく本来の切り替わり時刻
     $("circleTime").classList.add("flash");
     setTimeout(() => $("circleTime").classList.remove("flash"), 1500);
   }
