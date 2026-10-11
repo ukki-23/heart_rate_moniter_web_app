@@ -64,16 +64,10 @@
   .pill.stale { color: var(--warn); border-color: var(--warn); }
   .pill.off { color: var(--bad); border-color: var(--bad); }
   .close { padding: 2px 9px; font-size: 16px; line-height: 1.2; }
-  .mid { display: flex; align-items: flex-end; gap: 6px 14px; flex-wrap: wrap; }
+  .mid { display: flex; align-items: flex-end; gap: 14px; }
   .bpm { font-size: clamp(48px, 28cqw, 140px); font-weight: 800; line-height: 0.9; font-variant-numeric: tabular-nums; transition: opacity .3s; }
-  /* 3桁は横幅が増えるので、ゾーン表示がカードからはみ出さないよう縮める */
-  .bpm.wide { font-size: clamp(40px, 21cqw, 120px); }
   .bpm.stale { opacity: 0.4; }
   .unit { color: var(--muted); font-size: 16px; margin-bottom: 6px; }
-  .zone { margin-left: auto; text-align: right; }
-  .zone .z { font-size: clamp(20px, 9cqw, 40px); font-weight: 800; color: #0f1115; background: var(--zc);
-             border-radius: 8px; padding: 2px 14px; display: inline-block; }
-  .zone .pct { color: var(--muted); font-size: 14px; }
   .ago { color: var(--warn); font-size: 14px; min-height: 1.2em; }
   .stats { display: flex; gap: 16px; font-size: 13px; color: var(--muted); flex-wrap: wrap; align-items: center; }
   .stats .reset { padding: 0 6px; font-size: 14px; line-height: 1.5; color: var(--muted);
@@ -151,9 +145,7 @@
     </div>
     <div class="mid">
       <div class="bpm">--</div>
-      <div class="unit">bpm</div>
-      <div class="zone"><div class="z">--</div><div class="pct"></div></div>
-    </div>
+      <div class="unit">bpm</div>    </div>
     <div class="zbar"><span>Z1</span><span>Z2</span><span>Z3</span><span>Z4</span><span>Z5</span></div>
     <div class="ago"></div>
     <div class="stats">
@@ -368,7 +360,7 @@ function createCard(a) {
   a.el = el;
   a.ui = {
     name: el.querySelector(".name"), pill: el.querySelector(".pill"), bpm: el.querySelector(".bpm"),
-    z: el.querySelector(".z"), pct: el.querySelector(".pct"), ago: el.querySelector(".ago"),
+    ago: el.querySelector(".ago"),
     avg: el.querySelector(".avg"), max: el.querySelector(".max"), min: el.querySelector(".min"),
     maxhr: el.querySelector(".maxhr"), canvas: el.querySelector("canvas"),
     zbar: [...el.querySelectorAll(".zbar span")],
@@ -555,11 +547,8 @@ function renderCard(a, now) {
   u.pill.className = "pill " + pillClass;
 
   if (a.last !== null) {
-    const { zone, pct } = zoneOf(a.last, a.maxHr);
+    const { zone } = zoneOf(a.last, a.maxHr);
     u.bpm.textContent = a.last;
-    u.bpm.classList.toggle("wide", a.last >= 100);
-    u.z.textContent = zone.name;
-    u.pct.textContent = Math.round(pct * 100) + "%";
     // 受信中はカード全体をゾーン色に。信号なしのときは色を落とす
     a.el.style.setProperty("--zc", stale ? css("--line") : css(zone.color));
     u.bpm.style.color = stale ? "" : css(zone.color);
