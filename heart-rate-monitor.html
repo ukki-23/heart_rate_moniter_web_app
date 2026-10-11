@@ -64,8 +64,10 @@
   .pill.stale { color: var(--warn); border-color: var(--warn); }
   .pill.off { color: var(--bad); border-color: var(--bad); }
   .close { padding: 2px 9px; font-size: 16px; line-height: 1.2; }
-  .mid { display: flex; align-items: flex-end; gap: 14px; }
+  .mid { display: flex; align-items: flex-end; gap: 6px 14px; flex-wrap: wrap; }
   .bpm { font-size: clamp(48px, 28cqw, 140px); font-weight: 800; line-height: 0.9; font-variant-numeric: tabular-nums; transition: opacity .3s; }
+  /* 3桁は横幅が増えるので、ゾーン表示がカードからはみ出さないよう縮める */
+  .bpm.wide { font-size: clamp(40px, 21cqw, 120px); }
   .bpm.stale { opacity: 0.4; }
   .unit { color: var(--muted); font-size: 16px; margin-bottom: 6px; }
   .zone { margin-left: auto; text-align: right; }
@@ -86,7 +88,7 @@
 </head>
 <body>
 <header>
-  <h1>プール心拍モニター</h1>
+  <h1>心拍モニター</h1>
   <div class="group">
     <button class="primary" id="addBtn">＋ ウォッチを接続</button>
     <button id="restoreBtn" hidden>前回のウォッチに再接続</button>
@@ -555,6 +557,7 @@ function renderCard(a, now) {
   if (a.last !== null) {
     const { zone, pct } = zoneOf(a.last, a.maxHr);
     u.bpm.textContent = a.last;
+    u.bpm.classList.toggle("wide", a.last >= 100);
     u.z.textContent = zone.name;
     u.pct.textContent = Math.round(pct * 100) + "%";
     // 受信中はカード全体をゾーン色に。信号なしのときは色を落とす
