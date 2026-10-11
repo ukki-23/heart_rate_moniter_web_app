@@ -62,13 +62,11 @@
           background: var(--panel2); color: var(--muted); border: 1px solid var(--line); }
   .pill.live { color: var(--ok); border-color: var(--ok); }
   .pill.stale { color: var(--warn); border-color: var(--warn); }
-  .pill.off { color: var(--bad); border-color: var(--bad); }
   .close { padding: 2px 9px; font-size: 16px; line-height: 1.2; }
   .mid { display: flex; align-items: flex-end; gap: 14px; }
   .bpm { font-size: clamp(48px, 28cqw, 140px); font-weight: 800; line-height: 0.9; font-variant-numeric: tabular-nums; transition: opacity .3s; }
   .bpm.stale { opacity: 0.4; }
   .unit { color: var(--muted); font-size: 16px; margin-bottom: 6px; }
-  .ago { color: var(--warn); font-size: 14px; min-height: 1.2em; }
   .stats { display: flex; gap: 16px; font-size: 13px; color: var(--muted); flex-wrap: wrap; align-items: center; }
   .stats .reset { padding: 0 6px; font-size: 14px; line-height: 1.5; color: var(--muted);
                   background: transparent; border-color: transparent; margin-right: -10px; }
@@ -146,9 +144,7 @@
     <div class="mid">
       <div class="bpm">--</div>
       <div class="unit">bpm</div>    </div>
-    <div class="zbar"><span>Z1</span><span>Z2</span><span>Z3</span><span>Z4</span><span>Z5</span></div>
-    <div class="ago"></div>
-    <div class="stats">
+    <div class="zbar"><span>Z1</span><span>Z2</span><span>Z3</span><span>Z4</span><span>Z5</span></div>    <div class="stats">
       <button class="reset" title="この選手の平均・最高・最低をリセット">↻</button>
       <span>平均 <b class="avg">--</b></span>
       <span>最高 <b class="max">--</b></span>
@@ -163,7 +159,7 @@
 "use strict";
 
 // ---- 設定 ----
-const STALE_MS = 4000;          // これ以上受信がなければ「信号なし」
+const STALE_MS = 4000;          // これ以上受信がなければ「最終受信 ～前」
 const RECONNECT_MS = 2000;      // 再接続を試みる間隔
 const CONNECT_TIMEOUT_MS = 10000;
 const GAP_MS = 5000;            // グラフでこれ以上空いたら線を切る
@@ -359,9 +355,7 @@ function createCard(a) {
   const el = $("cardTpl").content.firstElementChild.cloneNode(true);
   a.el = el;
   a.ui = {
-    name: el.querySelector(".name"), pill: el.querySelector(".pill"), bpm: el.querySelector(".bpm"),
-    ago: el.querySelector(".ago"),
-    avg: el.querySelector(".avg"), max: el.querySelector(".max"), min: el.querySelector(".min"),
+    name: el.querySelector(".name"), pill: el.querySelector(".pill"), bpm: el.querySelector(".bpm"),    avg: el.querySelector(".avg"), max: el.querySelector(".max"), min: el.querySelector(".min"),
     maxhr: el.querySelector(".maxhr"), canvas: el.querySelector("canvas"),
     zbar: [...el.querySelectorAll(".zbar span")],
   };
@@ -539,10 +533,10 @@ function renderCard(a, now) {
   const stale = a.lastTime && now - a.lastTime > STALE_MS;
 
   let pillText, pillClass;
-  if (a.state === "disconnected") { pillText = "切断"; pillClass = "off"; }
-  else if (a.lastTime && !stale) { pillText = "受信中"; pillClass = "live"; }
-  else if (a.state === "connecting") { pillText = "接続中…"; pillClass = ""; }
-  else { pillText = "信号なし"; pillClass = "stale"; }
+  // 一度も受信していないときは接続中。受信後に途切れたら最終受信からの経過を出す
+  if (!a.lastTime) { pillText = "接続中…"; pillClass = ""; }
+  else if (!stale && a.state !== "disconnected") { pillText = "受信中"; pillClass = "live"; }
+  else { pillText = `最終受信 ${fmtAgo(now - a.lastTime)}`; pillClass = "stale"; }
   u.pill.textContent = pillText;
   u.pill.className = "pill " + pillClass;
 
@@ -555,7 +549,6 @@ function renderCard(a, now) {
     u.zbar.forEach((s, i) => s.classList.toggle("on", ZONES[i] === zone));
   }
   u.bpm.classList.toggle("stale", !!stale);
-  u.ago.textContent = stale ? `最終受信 ${fmtAgo(now - a.lastTime)}` : "";
 
   const s = a.sess;
   u.avg.textContent = s.n ? Math.round(s.sum / s.n) : "--";
